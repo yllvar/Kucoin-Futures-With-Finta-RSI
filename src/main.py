@@ -43,18 +43,23 @@ class CryptoTrader:
     async def fetch_and_analyze_ohlcv(self):
         while True:
             try:
-                # Fetch OHLCV data
+                # Fetch real-time ticker data
+                ticker = await self.exchange.fetch_ticker(SYMBOL)
+                current_price = ticker['last']
+                volume = ticker['baseVolume']
+
+                # Fetch OHLCV data for historical analysis
                 ohlcv = await self.exchange.fetch_ohlcv(SYMBOL, TIMEFRAME, limit=100)
                 df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
                 df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-                
+
                 # Ensure all necessary columns are numeric
                 for col in ['open', 'high', 'low', 'close', 'volume']:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
-                
+
                 # Calculate RSI
                 df['RSI'] = TA.RSI(df)
-                
+
                 # Calculate Bollinger Bands
                 bbands = TA.BBANDS(df, period=BBANDS_PERIOD, std_multiplier=BBANDS_STD_MULTIPLIER)
                 df = df.join(bbands)
@@ -62,7 +67,7 @@ class CryptoTrader:
                 # Generate trading signals
                 signal_rsi_threshold = self.generate_signal_rsi_threshold(df)
                 signal_rsi_divergence = self.generate_signal_rsi_divergence(df)
-                
+
                 # Execute trade if a signal is generated
                 if signal_rsi_threshold != "NEUTRAL" or signal_rsi_divergence != "NEUTRAL":
                     await self.execute_trade(df, signal_rsi_threshold, signal_rsi_divergence)
@@ -71,8 +76,9 @@ class CryptoTrader:
                 print(f"Close: {df.iloc[-1]['close']:.2f}, RSI: {df.iloc[-1]['RSI']:.2f}")
                 print(f"Signal (RSI Threshold): {signal_rsi_threshold}")
                 print(f"Signal (RSI Divergence): {signal_rsi_divergence}")
+                print(f"Current Price: {current_price}, Volume: {volume}")
                 print("--------------------")
-                
+
                 await asyncio.sleep(SLEEP_INTERVAL)
             except Exception as e:
                 print(f"Error fetching or analyzing data: {e}")
@@ -82,7 +88,7 @@ class CryptoTrader:
         # Check for RSI conditions
         rsi_overbought = df.iloc[-1]['RSI'] > RSI_OVERBOUGHT
         rsi_oversold = df.iloc[-1]['RSI'] < RSI_OVERSOLD
-        
+
         if rsi_oversold:
             return "LONG"
         elif rsi_overbought:
@@ -94,14 +100,14 @@ class CryptoTrader:
         # Implement refined RSI divergence strategy
         prices = df['close'].values[-3:]
         rsi_values = df['RSI'].values[-3:]
-        
+
         # Use finer thresholds for detecting rapid divergences
         bullish_divergence = (prices[-1] < prices[-3] and prices[-2] < prices[-3] and
                               rsi_values[-1] > rsi_values[-3] and rsi_values[-2] > rsi_values[-3])
-        
+
         bearish_divergence = (prices[-1] > prices[-3] and prices[-2] > prices[-3] and
                               rsi_values[-1] < rsi_values[-3] and rsi_values[-2] < rsi_values[-3])
-        
+
         if bullish_divergence:
             return "LONG"
         elif bearish_divergence:
@@ -129,13 +135,13 @@ class CryptoTrader:
 
     async def execute_trade(self, df, signal_rsi_threshold, signal_rsi_divergence):
         signal = signal_rsi_threshold if signal_rsi_threshold != "NEUTRAL" else signal_rsi_divergence
-        
+
         if signal == "NEUTRAL":
             return
 
         last_price = df.iloc[-1]['close']
         amount = 1.0  # You may want to adjust this based on your risk management strategy
-        
+
         stop_loss, take_profit = self.dynamic_stop_loss_take_profit(df, signal)
 
         for attempt in range(MAX_RETRIES):
@@ -148,12 +154,14 @@ class CryptoTrader:
 
                 # Create stop loss order
                 stop_loss_side = 'sell' if signal == "LONG" else 'buy'
-                stop_loss_order = await self.ccxt_trade.create_stop_loss_order(SYMBOL, stop_loss_side, amount, stop_loss)
+                stop_loss_order = await self.ccxt_trade.create_stop_loss_order(SYMBOL, stop_loss_side, amount,
+                                                                               stop_loss)
                 print(f"Stop loss order created: {stop_loss_order}")
 
                 # Create take profit order
                 take_profit_side = 'sell' if signal == "LONG" else 'buy'
-                take_profit_order = await self.ccxt_trade.create_take_profit_order(SYMBOL, take_profit_side, amount, take_profit)
+                take_profit_order = await self.ccxt_trade.create_take_profit_order(SYMBOL, take_profit_side, amount,
+                                                                                   take_profit)
                 print(f"Take profit order created: {take_profit_order}")
 
                 break  # If successful, break out of the retry loop
@@ -163,7 +171,8 @@ class CryptoTrader:
                     await asyncio.sleep(RETRY_DELAY)
                 else:
                     print("Max retries reached. Unable to execute trade.")
-                    
+
+
 async def main():
     while True:
         try:
@@ -174,6 +183,7 @@ async def main():
             print(f"An error occurred in the main loop: {e}")
             print("Restarting the trading process...")
             await asyncio.sleep(RETRY_DELAY)
+
 
 if __name__ == "__main__":
     while True:
