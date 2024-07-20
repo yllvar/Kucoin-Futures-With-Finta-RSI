@@ -1,3 +1,5 @@
+### Warnings: Chances of losing funds is high if you don't DYOR
+
 # Kucoin-Futures-With-Finta-RSI
 
 The algorithm demonstrates a solid foundation for automated trading strategies based on technical analysis indicators. Kucoin Futures trading algorithm meant to execute LONG and SHORT order for Cryptocurrency Futures Market using RSI Threshold and RSI Divergency while dynamically setting SL and TP using BBands
