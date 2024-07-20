@@ -19,6 +19,7 @@ class CCXTTrade:
         self.test_mode = test_mode
         self.history_file = 'ccxt_history.csv'
         self.initialize_history_file()
+        self.active_order = None
 
     async def get_futures_balance(self, symbol: str):
         await self.exchange.load_markets()
@@ -27,6 +28,10 @@ class CCXTTrade:
         return balance[quote_currency]['free']
 
     async def create_order(self, symbol: str, order_type: str, side: str, amount: float, price: Optional[float] = None, params: dict = {}):
+        if self.active_order:
+            print("An active order is still in place. New order creation skipped.")
+            return None
+        
         await self.exchange.load_markets()
         market = self.exchange.market(symbol)
         
@@ -45,11 +50,17 @@ class CCXTTrade:
             response = await self.exchange.create_order(symbol, order_type, side, amount, price, params)
         
         data = self.exchange.safe_dict(response, 'data', {})
+        parsed_order = self.exchange.parse_order(data, market)
         await self.track_trade(symbol, side, amount, price, data['orderId'], order_type, 'created')
-        
-        return self.exchange.parse_order(data, market)
+
+        self.active_order = parsed_order
+        return parsed_order
 
     async def create_stop_loss_order(self, symbol: str, side: str, amount: float, stop_loss_price: float, params: dict = {}):
+        if not self.active_order:
+            print("No active order found. Cannot create stop loss order.")
+            return None
+
         params.update({
             'stop': 'down' if side == 'buy' else 'up',
             'stopPrice': stop_loss_price,
@@ -60,6 +71,10 @@ class CCXTTrade:
         return order
 
     async def create_take_profit_order(self, symbol: str, side: str, amount: float, take_profit_price: float, params: dict = {}):
+        if not self.active_order:
+            print("No active order found. Cannot create take profit order.")
+            return None
+
         params.update({
             'stop': 'up' if side == 'buy' else 'down',
             'stopPrice': take_profit_price,
@@ -87,6 +102,9 @@ class CCXTTrade:
                 writer.writeheader()
             writer.writerow(trade_data)
 
+        if status in ['closed', 'canceled']:
+            self.active_order = None
+
     def initialize_history_file(self):
         filename = self.history_file
         if not Path(filename).is_file():
@@ -110,17 +128,20 @@ async def main():
     stop_loss_price = 18.0
     take_profit_price = 25.0
 
-    trader = CCXTTrade(API_KEY, SECRET_KEY, PASSPHRASE, test_mode=True)
+    trader = CCXTTrade(API_KEY, SECRET_KEY, PASSPHRASE, test_mode=False)
 
     try:
         order = await trader.create_order(symbol, order_type, side, amount, price)
-        print(f"Main order executed: {order}")
+        if order:
+            print(f"Main order executed: {order}")
 
-        stop_loss = await trader.create_stop_loss_order(symbol, 'sell', amount, stop_loss_price)
-        print(f"Stop loss order created: {stop_loss}")
+            stop_loss = await trader.create_stop_loss_order(symbol, 'sell', amount, stop_loss_price)
+            if stop_loss:
+                print(f"Stop loss order created: {stop_loss}")
 
-        take_profit = await trader.create_take_profit_order(symbol, 'sell', amount, take_profit_price)
-        print(f"Take profit order created: {take_profit}")
+            take_profit = await trader.create_take_profit_order(symbol, 'sell', amount, take_profit_price)
+            if take_profit:
+                print(f"Take profit order created: {take_profit}")
 
     except Exception as e:
         print(f"An error occurred: {e}")
